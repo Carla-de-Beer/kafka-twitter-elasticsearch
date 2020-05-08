@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.BlockingQueue;
@@ -24,19 +25,29 @@ import java.util.concurrent.TimeUnit;
 
 public class TwitterProducer {
 
-    private final List<String> TERMS = Lists.newArrayList("corona", "bitcoin", "usa", "money");
-
+    private final List<String> TERMS = Lists.newArrayList("corona", "news", "fake", "money");
     Logger logger = LoggerFactory.getLogger(TwitterProducer.class.getName());
 
-    public static void main(String[] args) throws IOException {
+    private static String consumerKey;
+    private static String consumerSecret;
+    private static String token;
+    private static String secret;
+    private static String bootstrapServer;
+    private static String topic;
+    private static String acksConfig;
+    private static String enableIdempotence;
+    private static String compressionType;
+    private static String lingerMs;
+    private static String maxInFlightRequestsPerConnection;
+
+    public static void main(String[] args) {
+        setProperties();
         new TwitterProducer().run();
     }
 
     public void run() {
-        final String TOPIC = "twitter_tweets";
-
         // Set up your blocking queues: Be sure to size these properly based on expected TPS of your stream
-        BlockingQueue<String> msgQueue = new LinkedBlockingQueue<String>(100000);
+        BlockingQueue<String> msgQueue = new LinkedBlockingQueue<>(100000);
 
         // Create twitter client
         Client client = createTwitterClient(msgQueue);
@@ -61,12 +72,9 @@ public class TwitterProducer {
                 if (msg != null) {
                     logger.info(msg);
                     System.out.println(msg);
-                    producer.send(new ProducerRecord<>(TOPIC, null, msg), new Callback() {
-                        @Override
-                        public void onCompletion(RecordMetadata recordMetadata, Exception e) {
-                            if (e != null) {
-                                logger.error("Error: " + e.getMessage());
-                            }
+                    producer.send(new ProducerRecord<>(topic, null, msg), (recordMetadata, e) -> {
+                        if (e != null) {
+                            logger.error("Error: " + e.getMessage());
                         }
                     });
                 }
@@ -86,16 +94,10 @@ public class TwitterProducer {
 
         hoseBirdEndpoint.trackTerms(TERMS);
 
-        // These secrets should be read from a config file
-        final String CONSUMER_KEY = "<CONSUMER_KEY>";
-        final String CONSUMER_SECRET = "<CONSUMER_SECRET>";
-        final String TOKEN = "<TOKEN>";
-        final String SECRET = "<SECRET>";
-
-        Authentication hosebirdAuth = new OAuth1(CONSUMER_KEY, CONSUMER_SECRET, TOKEN, SECRET);
+        Authentication hosebirdAuth = new OAuth1(consumerKey, consumerSecret, token, secret);
 
         ClientBuilder builder = new ClientBuilder()
-                .name("Hosebird-Client-01")
+                .name("HoseBird-Client-01")
                 .hosts(hoseBirdHosts)
                 .authentication(hosebirdAuth)
                 .endpoint(hoseBirdEndpoint)
@@ -105,25 +107,49 @@ public class TwitterProducer {
     }
 
     public KafkaProducer<String, String> createKafkaProducer() {
-        final String BOOTSTRAP_SERVER = "localhost:9092";
-
         // Producer properties
         Properties properties = new Properties();
-        properties.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVER);
+        properties.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServer);
         properties.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
         properties.setProperty(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
 
         // Create safe producer
-        properties.setProperty(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
-        properties.setProperty(ProducerConfig.ACKS_CONFIG, "all");
+        properties.setProperty(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, enableIdempotence);
+        properties.setProperty(ProducerConfig.ACKS_CONFIG, acksConfig);
         properties.setProperty(ProducerConfig.RETRIES_CONFIG, Integer.toString(Integer.MAX_VALUE));
-        properties.setProperty(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, "5");
+        properties.setProperty(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, maxInFlightRequestsPerConnection);
 
         // Make producer high-throughput
-        properties.setProperty(ProducerConfig.COMPRESSION_TYPE_CONFIG, "snappy");
-        properties.setProperty(ProducerConfig.LINGER_MS_CONFIG, "20");
-        properties.setProperty(ProducerConfig.BATCH_SIZE_CONFIG, Integer.toString(32 * 1024));
+        properties.setProperty(ProducerConfig.COMPRESSION_TYPE_CONFIG, compressionType);
+        properties.setProperty(ProducerConfig.LINGER_MS_CONFIG, lingerMs);
 
         return new KafkaProducer<>(properties);
     }
+
+    public static void setProperties() {
+        Properties prop = loadPropertiesFile("application.properties");
+
+        consumerKey = prop.getProperty("consumer.key");
+        consumerSecret = prop.getProperty("consumer.secret");
+        token = prop.getProperty("token");
+        secret = prop.getProperty("secret");
+        bootstrapServer = prop.getProperty("bootstrapServer");
+        topic = prop.getProperty("topic");
+        enableIdempotence = prop.getProperty("enable.idempotence");
+        acksConfig = prop.getProperty("acks.config");
+        compressionType = prop.getProperty("compression.type");
+        maxInFlightRequestsPerConnection = prop.getProperty("max.in.flight.requests.per.connection");
+        lingerMs = prop.getProperty("linger.ms");
+    }
+
+    private static Properties loadPropertiesFile(String filePath) {
+        Properties properties = new Properties();
+        try (InputStream resourceAsStream = TwitterProducer.class.getClassLoader().getResourceAsStream(filePath)) {
+            properties.load(resourceAsStream);
+        } catch (IOException e) {
+            System.err.println("Unable to load properties file: " + filePath);
+        }
+        return properties;
+    }
+
 }
