@@ -1,4 +1,4 @@
-package com.cadebe.consumer;
+package dev.cadebe.consumer;
 
 import com.google.gson.JsonParser;
 import org.apache.http.HttpHost;

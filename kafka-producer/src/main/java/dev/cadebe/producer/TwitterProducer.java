@@ -1,4 +1,4 @@
-package com.cadebe.producer;
+package dev.cadebe.producer;
 
 import com.google.common.collect.Lists;
 import com.twitter.hbc.ClientBuilder;
